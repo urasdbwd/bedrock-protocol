@@ -34,7 +34,7 @@ function createEncryptor (client, iv) {
   if (client.versionLessThan('1.16.220')) {
     client.cipher = createCipher(client.secretKeyBytes, iv, 'aes-256-cfb8')
   } else {
-    client.cipher = createCipher(client.secretKeyBytes, iv.slice(0, 12), 'aes-256-gcm')
+    client.cipher = createCipher(client.secretKeyBytes, iv.subarray(0, 12), 'aes-256-gcm')
   }
   client.sendCounter = client.sendCounter || 0n
   const hasHeader = client.features.compressorInHeader
@@ -76,7 +76,7 @@ function createDecryptor (client, iv) {
   if (client.versionLessThan('1.16.220')) {
     client.decipher = createDecipher(client.secretKeyBytes, iv, 'aes-256-cfb8')
   } else {
-    client.decipher = createDecipher(client.secretKeyBytes, iv.slice(0, 12), 'aes-256-gcm')
+    client.decipher = createDecipher(client.secretKeyBytes, iv.subarray(0, 12), 'aes-256-gcm')
   }
 
   client.receiveCounter = client.receiveCounter || 0n

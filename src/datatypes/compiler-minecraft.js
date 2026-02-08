@@ -8,7 +8,7 @@ const [Read, Write, SizeOf] = [{}, {}, {}]
  */
 Read.uuid = ['native', (buffer, offset) => {
   return {
-    value: UUID.stringify(buffer.slice(offset, 16 + offset)),
+    value: UUID.stringify(buffer.subarray(offset, 16 + offset)),
     size: 16
   }
 }]
@@ -24,7 +24,7 @@ SizeOf.uuid = ['native', 16]
  */
 Read.restBuffer = ['native', (buffer, offset) => {
   return {
-    value: buffer.slice(offset),
+    value: buffer.subarray(offset),
     size: buffer.length - offset
   }
 }]

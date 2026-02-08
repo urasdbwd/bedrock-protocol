@@ -7,7 +7,7 @@ const protoLEV = nbt.protos.littleVarint
 function readUUID (buffer, offset) {
   if (offset + 16 > buffer.length) { throw new Error('Reached end of buffer') }
   return {
-    value: UUID.stringify(buffer.slice(offset, 16 + offset)),
+    value: UUID.stringify(buffer.subarray(offset, 16 + offset)),
     size: 16
   }
 }

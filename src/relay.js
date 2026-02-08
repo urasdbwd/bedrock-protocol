@@ -17,16 +17,11 @@ class RelayPlayer extends Player {
     })
     this.downQ = []
     this.upQ = []
-    this.upInLog = (...msg) => console.debug('* Backend -> Proxy', ...msg)
-    this.upOutLog = (...msg) => console.debug('* Proxy -> Backend', ...msg)
-    this.downInLog = (...msg) => console.debug('* Client -> Proxy', ...msg)
-    this.downOutLog = (...msg) => console.debug('* Proxy -> Client', ...msg)
-
-    if (!server.options.logging) {
-      this.upInLog = () => { }
-      this.upOutLog = () => { }
-      this.downInLog = () => { }
-      this.downOutLog = () => { }
+    if (server.options.logging) {
+      this.upInLog = (...msg) => console.debug('* Backend -> Proxy', ...msg)
+      this.upOutLog = (...msg) => console.debug('* Proxy -> Backend', ...msg)
+      this.downInLog = (...msg) => console.debug('* Client -> Proxy', ...msg)
+      this.downOutLog = (...msg) => console.debug('* Proxy -> Client', ...msg)
     }
 
     this.outLog = this.downOutLog
@@ -39,7 +34,7 @@ class RelayPlayer extends Player {
   // Called when we get a packet from backend server (Backend -> PROXY -> Client)
   readUpstream (packet) {
     if (!this.startRelaying) {
-      this.upInLog('Client not ready, queueing packet until join')
+      this.upInLog?.('Client not ready, queueing packet until join')
       this.downQ.push(packet)
       return
     }
@@ -58,7 +53,7 @@ class RelayPlayer extends Player {
     }
     const name = des.data.name
     const params = des.data.params
-    this.upInLog('->', name, params)
+    this.upInLog?.('->', name, params)
 
     if (name === 'play_status' && params.status === 'login_success') return // Already sent this, this needs to be sent ASAP or client will disconnect
 
@@ -85,23 +80,23 @@ class RelayPlayer extends Player {
       for (const entry of this.chunkSendCache) {
         this.queue('level_chunk', entry)
       }
-      this.chunkSendCache = []
+      this.chunkSendCache.length = 0
     }
   }
 
   // Send queued packets to the connected client
   flushDownQueue () {
-    this.downOutLog('Flushing downstream queue')
+    this.downOutLog?.('Flushing downstream queue')
     for (const packet of this.downQ) {
       const des = this.server.deserializer.parsePacketBuffer(packet)
       this.write(des.data.name, des.data.params)
     }
-    this.downQ = []
+    this.downQ.length = 0
   }
 
   // Send queued packets to the backend upstream server from the client
   flushUpQueue () {
-    this.upOutLog('Flushing upstream queue')
+    this.upOutLog?.('Flushing upstream queue')
     for (const e of this.upQ) { // Send the queue
       const des = this.server.deserializer.parsePacketBuffer(e)
       if (des.data.name === 'client_cache_status') {
@@ -110,7 +105,7 @@ class RelayPlayer extends Player {
         this.upstream.write(des.data.name, des.data.params)
       }
     }
-    this.upQ = []
+    this.upQ.length = 0
   }
 
   // Called when the server gets a packet from the downstream player (Client -> PROXY -> Backend)
@@ -120,14 +115,14 @@ class RelayPlayer extends Player {
       // Upstream is still connecting/handshaking
       if (!this.upstream) {
         const des = this.server.deserializer.parsePacketBuffer(packet)
-        this.downInLog('Got downstream connected packet but upstream is not connected yet, added to q', des)
+        this.downInLog?.('Got downstream connected packet but upstream is not connected yet, added to q', des)
         this.upQ.push(packet) // Put into a queue
         return
       }
 
       // Send queued packets
       this.flushUpQueue()
-      this.downInLog('recv', packet)
+      this.downInLog?.('recv', packet)
 
       // TODO: If we fail to parse a packet, proxy it raw and log an error
       const des = this.server.deserializer.parsePacketBuffer(packet)
@@ -149,7 +144,7 @@ class RelayPlayer extends Player {
         // falls through
         default:
           // Emit the packet as-is back to the upstream server
-          this.downInLog('Relaying', des.data)
+          this.downInLog?.('Relaying', des.data)
           this.upstream.queue(des.data.name, des.data.params)
       }
     } else {

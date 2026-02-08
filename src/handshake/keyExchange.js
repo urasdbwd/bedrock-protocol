@@ -44,7 +44,7 @@ function KeyExchange (client, server, options) {
     // The encryption scheme is AES/CFB8/NoPadding with the
     // secret key being the result of the sha256 above and
     // the IV being the first 16 bytes of this secret key.
-    const initial = client.secretKeyBytes.slice(0, 16)
+    const initial = client.secretKeyBytes.subarray(0, 16)
     client.startEncryption(initial)
   }
 
@@ -72,7 +72,7 @@ function KeyExchange (client, server, options) {
     secretHash.update(client.sharedSecret)
 
     client.secretKeyBytes = secretHash.digest()
-    const iv = client.secretKeyBytes.slice(0, 16)
+    const iv = client.secretKeyBytes.subarray(0, 16)
     client.startEncryption(iv)
 
     // It works! First encrypted packet :)

@@ -8,9 +8,9 @@ class Parser extends FullPacketParser {
     if (packet.length > 1000) {
       const now = Date.now()
       fs.writeFileSync(now + '_packetReadError.txt', packet.toString('hex'))
-      console.log(prefix, `Deserialization failure for packet 0x${packet.slice(0, 1).toString('hex')}. Packet buffer saved in ./${now}_packetReadError.txt as buffer was too large (${packet.length} bytes).`)
+      console.log(prefix, `Deserialization failure for packet 0x${packet.subarray(0, 1).toString('hex')}. Packet buffer saved in ./${now}_packetReadError.txt as buffer was too large (${packet.length} bytes).`)
     } else {
-      console.log(prefix, 'Read failure for 0x' + packet.slice(0, 1).toString('hex'), packet.slice(0, 1000))
+      console.log(prefix, 'Read failure for 0x' + packet.subarray(0, 1).toString('hex'), packet.subarray(0, 1000))
     }
   }
 
