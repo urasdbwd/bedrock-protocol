@@ -1,27 +1,33 @@
 const crypto = require('crypto')
-const Zlib = require('zlib')
+const { deflateRaw, inflateRaw } = require('./compression')
+
+const isBun = typeof Bun !== 'undefined'
 
 function createCipher (secret, initialValue, cipherAlgorithm) {
-  if (crypto.getCiphers().includes(cipherAlgorithm)) {
-    return crypto.createCipheriv(cipherAlgorithm, secret, initialValue)
-  }
+  return crypto.createCipheriv(cipherAlgorithm, secret, initialValue)
 }
 
 function createDecipher (secret, initialValue, cipherAlgorithm) {
-  if (crypto.getCiphers().includes(cipherAlgorithm)) {
-    return crypto.createDecipheriv(cipherAlgorithm, secret, initialValue)
-  }
+  return crypto.createDecipheriv(cipherAlgorithm, secret, initialValue)
 }
 
+const _counterBuf = Buffer.alloc(8)
+// Bun.CryptoHasher auto-resets after digest(), so a single instance can be reused
+const _hasher = isBun ? new Bun.CryptoHasher('sha256') : null
+
 function computeCheckSum (packetPlaintext, sendCounter, secretKeyBytes) {
+  _counterBuf.writeBigInt64LE(sendCounter, 0)
+  if (_hasher) {
+    _hasher.update(_counterBuf)
+    _hasher.update(packetPlaintext)
+    _hasher.update(secretKeyBytes)
+    return _hasher.digest().subarray(0, 8)
+  }
   const digest = crypto.createHash('sha256')
-  const counter = Buffer.alloc(8)
-  counter.writeBigInt64LE(sendCounter, 0)
-  digest.update(counter)
+  digest.update(_counterBuf)
   digest.update(packetPlaintext)
   digest.update(secretKeyBytes)
-  const hash = digest.digest()
-  return hash.slice(0, 8)
+  return digest.digest().subarray(0, 8)
 }
 
 function createEncryptor (client, iv) {
@@ -31,16 +37,30 @@ function createEncryptor (client, iv) {
     client.cipher = createCipher(client.secretKeyBytes, iv.slice(0, 12), 'aes-256-gcm')
   }
   client.sendCounter = client.sendCounter || 0n
+  const hasHeader = client.features.compressorInHeader
+  const compressionLevel = client.compressionLevel
+  const secretKeyBytes = client.secretKeyBytes
 
   // A packet is encrypted via AES256(plaintext + SHA256(send_counter + plaintext + secret_key)[0:8]).
   // The send counter is represented as a little-endian 64-bit long and incremented after each packet.
 
   function process (chunk) {
-    const compressed = Zlib.deflateRawSync(chunk, { level: client.compressionLevel })
-    const buffer = client.features.compressorInHeader
-      ? Buffer.concat([Buffer.from([0]), compressed])
-      : compressed
-    const packet = Buffer.concat([buffer, computeCheckSum(buffer, client.sendCounter, client.secretKeyBytes)])
+    const compressed = deflateRaw(chunk, compressionLevel)
+    const headerLen = hasHeader ? 1 : 0
+
+    const packet = Buffer.allocUnsafe(headerLen + compressed.length + 8)
+    let offset = 0
+    if (hasHeader) {
+      packet[0] = 0
+      offset = 1
+    }
+    compressed.copy(packet, offset)
+    offset += compressed.length
+
+    const checksumInput = packet.subarray(0, offset)
+    const checksum = computeCheckSum(checksumInput, client.sendCounter, secretKeyBytes)
+    checksum.copy(packet, offset)
+
     client.sendCounter++
     client.cipher.write(packet)
   }
@@ -60,11 +80,13 @@ function createDecryptor (client, iv) {
   }
 
   client.receiveCounter = client.receiveCounter || 0n
+  const decHasHeader = client.features.compressorInHeader
+  const decSecretKeyBytes = client.secretKeyBytes
 
   function verify (chunk) {
-    const packet = chunk.slice(0, chunk.length - 8)
-    const checksum = chunk.slice(chunk.length - 8, chunk.length)
-    const computedCheckSum = computeCheckSum(packet, client.receiveCounter, client.secretKeyBytes)
+    const packet = chunk.subarray(0, chunk.length - 8)
+    const checksum = chunk.subarray(chunk.length - 8)
+    const computedCheckSum = computeCheckSum(packet, client.receiveCounter, decSecretKeyBytes)
     client.receiveCounter++
 
     if (!checksum.equals(computedCheckSum)) {
@@ -74,19 +96,19 @@ function createDecryptor (client, iv) {
     }
 
     let buffer
-    if (client.features.compressorInHeader) {
+    if (decHasHeader) {
       switch (packet[0]) {
         case 0:
-          buffer = Zlib.inflateRawSync(packet.slice(1), { chunkSize: 512000 })
+          buffer = inflateRaw(packet.subarray(1))
           break
         case 255:
-          buffer = packet.slice(1)
+          buffer = packet.subarray(1)
           break
         default:
           client.emit('error', Error(`Unsupported compressor: ${packet[0]}`))
       }
     } else {
-      buffer = Zlib.inflateRawSync(packet, { chunkSize: 512000 })
+      buffer = inflateRaw(packet)
     }
 
     client.onDecryptedPacket(buffer)

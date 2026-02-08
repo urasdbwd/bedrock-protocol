@@ -100,7 +100,7 @@ class Client extends Connection {
 
   onEncapsulated = (encapsulated, inetAddr) => {
     const buffer = Buffer.from(encapsulated.buffer)
-    process.nextTick(() => this.handle(buffer))
+    queueMicrotask(() => this.handle(buffer))
   }
 
   async ping () {
@@ -141,6 +141,7 @@ class Client extends Connection {
     this.compressionAlgorithm = packet.compression_algorithm || 'deflate'
     this.compressionThreshold = packet.compression_threshold
     this.compressionReady = true
+    if (this._framer) this._framer.updateSettings(this)
   }
 
   sendLogin () {
@@ -229,13 +230,12 @@ class Client extends Connection {
       this.emit('error', e)
       return
     }
-    const pakData = { name: des.data.name, params: des.data.params }
-    this.inLog?.('-> C', pakData.name, this.options.logging ? serialize(pakData.params) : '')
+    this.inLog?.('-> C', des.data.name, this.options.logging ? serialize(des.data.params) : '')
     this.emit('packet', des)
 
     if (debugging) {
       // Packet verifying (decode + re-encode + match test)
-      if (pakData.name) {
+      if (des.data.name) {
         this.deserializer.verify(packet, this.serializer)
       }
     }
@@ -256,10 +256,10 @@ class Client extends Connection {
         this.onDisconnectRequest(des.data.params)
         break
       case 'start_game':
-        this.startGameData = pakData.params
+        this.startGameData = des.data.params
         // fallsthrough
       case 'item_registry': // 1.21.60+ send itemstates in item_registry packet
-        pakData.params.itemstates?.forEach(state => {
+        des.data.params.itemstates?.forEach(state => {
           if (state.name === 'minecraft:shield') {
             this.serializer.proto.setVariable('ShieldItemID', state.runtime_id)
             this.deserializer.proto.setVariable('ShieldItemID', state.runtime_id)
@@ -272,7 +272,7 @@ class Client extends Connection {
           this.emit('join')
           this.status = ClientStatus.Initializing
         }
-        this.onPlayStatus(pakData.params)
+        this.onPlayStatus(des.data.params)
         break
       default:
         if (this.status !== ClientStatus.Initializing && this.status !== ClientStatus.Initialized) {

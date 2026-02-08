@@ -30,9 +30,9 @@ const defaultOptions = {
   // server: What compression algorithm to use by default, either `none`, `deflate` or `snappy`
   compressionAlgorithm: 'deflate',
   // server and client: On Deflate, what compression level to use, between 1 and 9
-  compressionLevel: 7,
+  compressionLevel: 3,
   // server: If true, only compress if a payload is larger than compressionThreshold
-  compressionThreshold: 512,
+  compressionThreshold: 1024,
 
   // NEW: Proxy configuration for SOCKS5 UDP proxy
   // Set to null for direct connection, or provide proxy details:

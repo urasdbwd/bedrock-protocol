@@ -105,7 +105,7 @@ class Server extends EventEmitter {
       return
     }
 
-    process.nextTick(() => client.handle(buffer))
+    queueMicrotask(() => client.handle(buffer))
   }
 
   getAdvertisement () {

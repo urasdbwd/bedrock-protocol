@@ -15,7 +15,6 @@ const ClientStatus = {
 class Connection extends EventEmitter {
   #status = ClientStatus.Disconnected
   sendQ = []
-  sendIds = []
 
   get status () {
     return this.#status
@@ -45,6 +44,15 @@ class Connection extends EventEmitter {
   versionLessThanOrEqualTo (version) {
     if (typeof version === 'string' && !Versions[version]) throw Error('Unknown version: ' + version)
     return this.options.protocolVersion <= (typeof version === 'string' ? Versions[version] : version)
+  }
+
+  _getFramer () {
+    if (!this._framer) {
+      this._framer = new Framer(this)
+    } else {
+      this._framer.reset()
+    }
+    return this._framer
   }
 
   startEncryption (iv) {
@@ -81,7 +89,7 @@ class Connection extends EventEmitter {
   write (name, params) {
     this.outLog?.(name, params)
     this._processOutbound(name, params)
-    const batch = new Framer(this)
+    const batch = this._getFramer()
     const packet = this.serializer.createPacketBuffer({ name, params })
     batch.addEncodedPacket(packet)
 
@@ -102,15 +110,13 @@ class Connection extends EventEmitter {
       return
     }
     this.sendQ.push(packet)
-    this.sendIds.push(name)
   }
 
   _tick () {
     if (this.sendQ.length) {
-      const batch = new Framer(this)
+      const batch = this._getFramer()
       batch.addEncodedPackets(this.sendQ)
-      this.sendQ = []
-      this.sendIds = []
+      this.sendQ.length = 0
       if (this.encryptionEnabled) {
         this.sendEncryptedBatch(batch)
       } else {
@@ -131,7 +137,7 @@ class Connection extends EventEmitter {
    */
   sendBuffer (buffer, immediate = false) {
     if (immediate) {
-      const batch = new Framer(this)
+      const batch = this._getFramer()
       batch.addEncodedPacket(buffer)
       if (this.encryptionEnabled) {
         this.sendEncryptedBatch(batch)
@@ -140,7 +146,6 @@ class Connection extends EventEmitter {
       }
     } else {
       this.sendQ.push(buffer)
-      this.sendIds.push('rawBuffer')
     }
   }
 
@@ -165,8 +170,14 @@ class Connection extends EventEmitter {
 
   // These are callbacks called from encryption.js
   onEncryptedPacket = (buf) => {
-    const packet = this.batchHeader ? Buffer.concat([Buffer.from([this.batchHeader]), buf]) : buf
-    this.sendMCPE(packet)
+    if (this.batchHeader) {
+      const packet = Buffer.allocUnsafe(1 + buf.length)
+      packet[0] = this.batchHeader
+      buf.copy(packet, 1)
+      this.sendMCPE(packet)
+    } else {
+      this.sendMCPE(buf)
+    }
   }
 
   onDecryptedPacket = (buf) => {
@@ -179,7 +190,7 @@ class Connection extends EventEmitter {
   handle (buffer) { // handle encapsulated
     if (!this.batchHeader || buffer[0] === this.batchHeader) { // wrapper
       if (this.encryptionEnabled) {
-        this.decrypt(buffer.slice(1))
+        this.decrypt(buffer.subarray(1))
       } else {
         const packets = Framer.decode(this, buffer)
         for (const packet of packets) {

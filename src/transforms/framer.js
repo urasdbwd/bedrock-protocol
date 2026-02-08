@@ -1,5 +1,5 @@
 const [readVarInt, writeVarInt, sizeOfVarInt] = require('protodef').types.varint
-const zlib = require('zlib')
+const { deflateRaw, inflateRaw } = require('./compression')
 
 // Concatenates packets into one batch packet, and adds length prefixs.
 class Framer {
@@ -14,10 +14,22 @@ class Framer {
     this.writeCompressor = client.features.compressorInHeader && client.compressionReady
   }
 
-  // No compression in base class
+  reset () {
+    this.packets.length = 0
+  }
+
+  updateSettings (client) {
+    this.batchHeader = client.batchHeader
+    this.compressor = client.compressionAlgorithm || 'none'
+    this.compressionLevel = client.compressionLevel
+    this.compressionThreshold = client.compressionThreshold
+    this.compressionHeader = client.compressionHeader || 0
+    this.writeCompressor = client.features.compressorInHeader && client.compressionReady
+  }
+
   compress (buffer) {
     switch (this.compressor) {
-      case 'deflate': return zlib.deflateRawSync(buffer, { level: this.compressionLevel })
+      case 'deflate': return deflateRaw(buffer, this.compressionLevel)
       case 'snappy': throw Error('Snappy compression not implemented')
       case 'none': return buffer
     }
@@ -27,7 +39,7 @@ class Framer {
     switch (algorithm) {
       case 0:
       case 'deflate':
-        return zlib.inflateRawSync(buffer, { chunkSize: 512000 })
+        return inflateRaw(buffer)
       case 1:
       case 'snappy':
         throw Error('Snappy compression not implemented')
@@ -41,11 +53,11 @@ class Framer {
   static decode (client, buf) {
     // Read header
     if (this.batchHeader && buf[0] !== this.batchHeader) throw Error(`bad batch packet header, received: ${buf[0]}, expected: ${this.batchHeader}`)
-    const buffer = buf.slice(1)
+    const buffer = buf.subarray(1)
     // Decompress
     let decompressed
     if (client.features.compressorInHeader && client.compressionReady) {
-      decompressed = this.decompress(buffer[0], buffer.slice(1))
+      decompressed = this.decompress(buffer[0], buffer.subarray(1))
     } else {
       // On old versions, compressor is session-wide ; failing to decompress
       // a packet will assume it's not compressed
@@ -59,11 +71,22 @@ class Framer {
   }
 
   encode () {
-    const buf = Buffer.concat(this.packets)
+    const buf = this.packets.length === 1 ? this.packets[0] : Buffer.concat(this.packets)
     const shouldCompress = buf.length > this.compressionThreshold
-    const header = this.batchHeader ? [this.batchHeader] : []
-    if (this.writeCompressor) header.push(shouldCompress ? this.compressionHeader : 255)
-    return Buffer.concat([Buffer.from(header), shouldCompress ? this.compress(buf) : buf])
+    const compressed = shouldCompress ? this.compress(buf) : buf
+
+    let headerLen = 0
+    if (this.batchHeader) headerLen++
+    if (this.writeCompressor) headerLen++
+
+    if (headerLen === 0) return compressed
+
+    const result = Buffer.allocUnsafe(headerLen + compressed.length)
+    let offset = 0
+    if (this.batchHeader) result[offset++] = this.batchHeader
+    if (this.writeCompressor) result[offset++] = shouldCompress ? this.compressionHeader : 255
+    compressed.copy(result, offset)
+    return result
   }
 
   addEncodedPacket (chunk) {
@@ -91,7 +114,7 @@ class Framer {
   }
 
   getBuffer () {
-    return Buffer.concat(this.packets)
+    return this.packets.length === 1 ? this.packets[0] : Buffer.concat(this.packets)
   }
 
   static getPackets (buffer) {
@@ -99,10 +122,9 @@ class Framer {
     let offset = 0
     while (offset < buffer.byteLength) {
       const { value, size } = readVarInt(buffer, offset)
-      const dec = Buffer.allocUnsafe(value)
       offset += size
-      offset += buffer.copy(dec, 0, offset, offset + value)
-      packets.push(dec)
+      packets.push(buffer.subarray(offset, offset + value))
+      offset += value
     }
     return packets
   }
